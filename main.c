@@ -21,8 +21,10 @@ typedef struct {
 /* Estado global (lido da entrada) */
 static int  num_resources = 0;
 static int  num_customers = 0;
-static int *available_total = NULL;   /* instâncias totais (argumentos) */
+static int *available = NULL;         /* disponivel: inicializado com os argumentos */
 static int **maximum = NULL;          /* [customer][resource] */
+static int **allocation = NULL;       /* [customer][resource], inicia em 0 */
+static int **need = NULL;             /* [customer][resource] = maximum - allocation */
 static Command *commands = NULL;
 static int  num_commands = 0;
 
@@ -66,11 +68,11 @@ static void parse_args(int argc, char *argv[]) {
         fail("uso: %s <inst_recurso_0> <inst_recurso_1> ... (ao menos 1 recurso)", argv[0]);
 
     num_resources = argc - 1;
-    available_total = malloc(num_resources * sizeof(int));
-    if (!available_total) fail("falha de alocacao de memoria");
+    available = malloc(num_resources * sizeof(int));
+    if (!available) fail("falha de alocacao de memoria");
 
     for (int i = 0; i < num_resources; i++) {
-        if (parse_nonneg_int(argv[i + 1], &available_total[i]) != 0)
+        if (parse_nonneg_int(argv[i + 1], &available[i]) != 0)
             fail("argumento %d invalido ('%s'): esperado inteiro nao negativo", i + 1, argv[i + 1]);
     }
 }
@@ -201,14 +203,38 @@ static void load_commands(const char *path) {
     fclose(f);
 }
 
+/* ---------- estado inicial ---------- */
+
+/* allocation comeca zerada e need = maximum (nada alocado ainda).
+   available ja foi preenchido em parse_args com os argumentos. */
+static void init_state(void) {
+    allocation = malloc(num_customers * sizeof(int *));
+    need = malloc(num_customers * sizeof(int *));
+    if (!allocation || !need) fail("falha de alocacao de memoria");
+
+    for (int i = 0; i < num_customers; i++) {
+        allocation[i] = calloc(num_resources, sizeof(int));
+        need[i] = malloc(num_resources * sizeof(int));
+        if (!allocation[i] || !need[i]) fail("falha de alocacao de memoria");
+        for (int j = 0; j < num_resources; j++)
+            need[i][j] = maximum[i][j] - allocation[i][j];
+    }
+}
+
 /* ---------- liberação ---------- */
 
 static void cleanup(void) {
-    for (int i = 0; i < num_customers; i++) free(maximum[i]);
+    for (int i = 0; i < num_customers; i++) {
+        free(maximum[i]);
+        if (allocation) free(allocation[i]);
+        if (need) free(need[i]);
+    }
     free(maximum);
+    free(allocation);
+    free(need);
     for (int i = 0; i < num_commands; i++) free(commands[i].resources);
     free(commands);
-    free(available_total);
+    free(available);
 }
 
 /* ---------- main ---------- */
@@ -217,13 +243,14 @@ int main(int argc, char *argv[]) {
     parse_args(argc, argv);
     load_customers(CUSTOMER_FILE);
     load_commands(COMMANDS_FILE);
+    init_state();
 
-    /* TODO: inicializar available/allocation/need, executar comandos
+    /* TODO: executar comandos
        (request_resources / release_resources / print_state) e gravar result.txt */
 
     /* Saída de depuração temporária */
-    printf("Recursos (%d):", num_resources);
-    for (int j = 0; j < num_resources; j++) printf(" %d", available_total[j]);
+    printf("AVAILABLE inicial (%d recursos):", num_resources);
+    for (int j = 0; j < num_resources; j++) printf(" %d", available[j]);
     printf("\nClientes: %d\n", num_customers);
     for (int i = 0; i < num_customers; i++) {
         printf("  C%d max:", i);
