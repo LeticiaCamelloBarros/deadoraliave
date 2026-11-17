@@ -2,34 +2,42 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include <errno.h>
-#include <stdarg.h>
 #include <limits.h>
+
+#include "init.h"
 #include "matriz.h"
-#include "resource.h" 
+#include "banker.h"
 
 #define CUSTOMER_FILE "customer.txt"
 #define COMMANDS_FILE "commands.txt"
+#define RESULT_FILE   "result.txt"
 
 typedef enum { CMD_RQ, CMD_RL, CMD_STAR } CmdType;
 
 typedef struct {
     CmdType type;
-    int customer;   /* -1 para "*" */
-    int *resources; /* NULL para "*" */
+    int customer;    /* -1 para "*" */
+    int *resources;  /* NULL para "*" */
 } Command;
 
-/* Estado global (lido da entrada) */
-static int  num_resources = 0;
-static int  num_customers = 0;
-static int *available_total = NULL;   /* instâncias totais (argumentos) */
-static int **maximum = NULL;          /* [customer][resource] */
 static Command *commands = NULL;
-static int  num_commands = 0;
+static int num_commands = 0;
 
-/* ---------- utilitários ---------- */
+/* ---------- utilitarios ---------- */
 
+/* Libera tudo; registrada com atexit para valer tambem nos caminhos de erro */
+static void cleanup(void) {
+    for (int i = 0; i < num_commands; i++) free(commands[i].resources);
+    free(commands);
+    commands = NULL;
+    num_commands = 0;
+    free_matrices();
+}
+
+/* Mensagem de erro em stderr e encerramento controlado */
 static void fail(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 static void fail(const char *fmt, ...) {
     va_list ap;
@@ -41,7 +49,7 @@ static void fail(const char *fmt, ...) {
     exit(EXIT_FAILURE);
 }
 
-/* Remove espaços/\r/\n nas pontas (in place) */
+/* Remove espacos, \r e \n nas pontas (in place) */
 static char *trim(char *s) {
     while (isspace((unsigned char)*s)) s++;
     char *end = s + strlen(s);
@@ -49,9 +57,9 @@ static char *trim(char *s) {
     return s;
 }
 
-/* Converte string inteira em inteiro >= 0. Retorna 0 em sucesso, -1 em erro. */
+/* Inteiro >= 0, so digitos. Retorna 0 em sucesso, -1 se invalido. */
 static int parse_nonneg_int(const char *s, int *out) {
-    if (s == NULL || *s == '\0') return -1;
+    if (!s || !*s) return -1;
     for (const char *p = s; *p; p++)
         if (!isdigit((unsigned char)*p)) return -1;
     errno = 0;
@@ -61,92 +69,19 @@ static int parse_nonneg_int(const char *s, int *out) {
     return 0;
 }
 
-/* ---------- argumentos ---------- */
-
-static void parse_args(int argc, char *argv[]) {
-    if (argc < 2)
-        fail("uso: %s <inst_recurso_0> <inst_recurso_1> ... (ao menos 1 recurso)", argv[0]);
-
-    num_resources = argc - 1;
-    /*available nao é uma matriz mas sim um vetor unidimensional */
-    available_total = malloc(num_resources * sizeof(int));
-    if (!available_total) fail("falha de alocacao de memoria");
-
-    for (int i = 0; i < num_resources; i++) {
-        if (parse_nonneg_int(argv[i + 1], &available_total[i]) != 0)
-            fail("argumento %d invalido ('%s'): esperado inteiro nao negativo", i + 1, argv[i + 1]);
-    }
-}
-
-/* ---------- customer.txt ---------- */
-
-static void load_customers(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) fail("nao foi possivel abrir '%s': %s", path, strerror(errno));
-
-    int cap = 8;
-    maximum = malloc(cap * sizeof(int *));
-    if (!maximum) fail("falha de alocacao de memoria");
-
-    char *line = NULL;
-    size_t len = 0;
-    int lineno = 0;
-    int blank_seen = 0;
-
-    while (getline(&line, &len, f) != -1) {
-        lineno++;
-        char *t = trim(line);
-
-        if (*t == '\0') { blank_seen = 1; continue; }   /* tolera linhas vazias apenas no fim */
-        if (blank_seen)
-            fail("%s:%d: linha vazia no meio do arquivo", path, lineno - 1);
-
-        if (num_customers == cap) {
-            cap *= 2;
-            maximum = realloc(maximum, cap * sizeof(int *));
-            if (!maximum) fail("falha de alocacao de memoria");
-        }
-
-        int *row = malloc(num_resources * sizeof(int));
-        if (!row) fail("falha de alocacao de memoria");
-
-        /* strtok ignora campos vazios ("7,,3" ou "7,5,"), entao conta virgulas antes */
-        int commas = 0;
-        for (const char *p = t; *p; p++) if (*p == ',') commas++;
-        if (commas != num_resources - 1)
-            fail("%s:%d: formato invalido (esperado %d valores separados por virgula)",
-                 path, lineno, num_resources);
-
-        int count = 0;
-        char *save = NULL;
-        for (char *tok = strtok_r(t, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
-            tok = trim(tok);
-            if (count >= num_resources)
-                fail("%s:%d: mais valores que o numero de recursos (%d)", path, lineno, num_resources);
-            if (parse_nonneg_int(tok, &row[count]) != 0)
-                fail("%s:%d: valor invalido '%s' (formato esperado: n,n,n)", path, lineno, tok);
-            count++;
-        }
-        if (count != num_resources)
-            fail("%s:%d: %d valores encontrados, mas existem %d recursos nos argumentos",
-                 path, lineno, count, num_resources);
-
-        maximum[num_customers++] = row;
-    }
-    free(line);
-    fclose(f);
-
-    if (num_customers == 0) fail("'%s' nao contem nenhum cliente", path);
-}
-
 /* ---------- commands.txt ---------- */
 
+/* Le e valida todos os comandos. Usa as dimensoes ja definidas no modulo
+   matriz (clientes do customer.txt, recursos dos argumentos). */
 static void load_commands(const char *path) {
+    const int n = get_num_customers();
+    const int m = get_num_resources();
+
     FILE *f = fopen(path, "r");
     if (!f) fail("nao foi possivel abrir '%s': %s", path, strerror(errno));
 
     int cap = 16;
-    commands = malloc(cap * sizeof(Command));
+    commands = malloc((size_t)cap * sizeof(Command));
     if (!commands) fail("falha de alocacao de memoria");
 
     char *line = NULL;
@@ -156,47 +91,61 @@ static void load_commands(const char *path) {
     while (getline(&line, &len, f) != -1) {
         lineno++;
         char *t = trim(line);
-        if (*t == '\0') continue;   /* ignora linhas vazias */
+        if (*t == '\0') continue;                      /* ignora linhas vazias */
 
         char *save = NULL;
         char *op = strtok_r(t, " \t", &save);
         Command cmd = { CMD_STAR, -1, NULL };
 
         if (strcmp(op, "*") == 0) {
-            if (strtok_r(NULL, " \t", &save) != NULL)
+            if (strtok_r(NULL, " \t", &save) != NULL) {
+                free(line); fclose(f);
                 fail("%s:%d: o comando '*' nao recebe parametros", path, lineno);
+            }
         } else if (strcmp(op, "RQ") == 0 || strcmp(op, "RL") == 0) {
             cmd.type = (op[1] == 'Q') ? CMD_RQ : CMD_RL;
 
             char *tok = strtok_r(NULL, " \t", &save);
-            if (!tok || parse_nonneg_int(tok, &cmd.customer) != 0)
+            if (!tok || parse_nonneg_int(tok, &cmd.customer) != 0) {
+                free(line); fclose(f);
                 fail("%s:%d: numero de cliente invalido ou ausente", path, lineno);
-            if (cmd.customer >= num_customers)
+            }
+            if (cmd.customer >= n) {
+                int c = cmd.customer;
+                free(line); fclose(f);
                 fail("%s:%d: cliente %d inexistente (ha %d clientes em %s)",
-                     path, lineno, cmd.customer, num_customers, CUSTOMER_FILE);
+                     path, lineno, c, n, CUSTOMER_FILE);
+            }
 
-            cmd.resources = malloc(num_resources * sizeof(int));
-            if (!cmd.resources) fail("falha de alocacao de memoria");
+            cmd.resources = malloc((size_t)m * sizeof(int));
+            if (!cmd.resources) { free(line); fclose(f); fail("falha de alocacao de memoria"); }
 
             int count = 0;
             while ((tok = strtok_r(NULL, " \t", &save)) != NULL) {
-                if (count >= num_resources)
-                    fail("%s:%d: mais valores que o numero de recursos (%d)", path, lineno, num_resources);
-                if (parse_nonneg_int(tok, &cmd.resources[count]) != 0)
-                    fail("%s:%d: valor invalido '%s'", path, lineno, tok);
+                if (count >= m || parse_nonneg_int(tok, &cmd.resources[count]) != 0) {
+                    free(cmd.resources); free(line); fclose(f);
+                    fail("%s:%d: valor invalido ou em excesso '%s' (esperados %d valores)",
+                         path, lineno, tok, m);
+                }
                 count++;
             }
-            if (count != num_resources)
+            if (count != m) {
+                free(cmd.resources); free(line); fclose(f);
                 fail("%s:%d: %d valores encontrados, mas existem %d recursos nos argumentos",
-                     path, lineno, count, num_resources);
+                     path, lineno, count, m);
+            }
         } else {
-            fail("%s:%d: comando desconhecido '%s' (esperado RQ, RL ou *)", path, lineno, op);
+            char bad[32];
+            snprintf(bad, sizeof bad, "%s", op);
+            free(line); fclose(f);
+            fail("%s:%d: comando desconhecido '%s' (esperado RQ, RL ou *)", path, lineno, bad);
         }
 
         if (num_commands == cap) {
             cap *= 2;
-            commands = realloc(commands, cap * sizeof(Command));
-            if (!commands) fail("falha de alocacao de memoria");
+            Command *tmp = realloc(commands, (size_t)cap * sizeof(Command));
+            if (!tmp) { free(cmd.resources); free(line); fclose(f); fail("falha de alocacao de memoria"); }
+            commands = tmp;
         }
         commands[num_commands++] = cmd;
     }
@@ -204,43 +153,38 @@ static void load_commands(const char *path) {
     fclose(f);
 }
 
-/* ---------- liberação ---------- */
+/* ---------- execucao ---------- */
 
-static void cleanup(void) {
-    for (int i = 0; i < num_customers; i++) free(maximum[i]);
-    free(maximum);
-    for (int i = 0; i < num_commands; i++) free(commands[i].resources);
-    free(commands);
-    free(available_total);
+/* Percorre os comandos na ordem e delega ao modulo banker / matriz */
+static void run_commands(FILE *out) {
+    for (int k = 0; k < num_commands; k++) {
+        const Command *c = &commands[k];
+        switch (c->type) {
+            case CMD_RQ:   request_resources(c->customer, c->resources, out); break;
+            case CMD_RL:   release_resources(c->customer, c->resources, out); break;
+            case CMD_STAR: print_state(out);                                  break;
+        }
+    }
 }
 
 /* ---------- main ---------- */
 
 int main(int argc, char *argv[]) {
-    parse_args(argc, argv);
-    load_customers(CUSTOMER_FILE);
+    atexit(cleanup);
+
+    /* 1. Argumentos + customer.txt -> estado inicial (modulo matriz) */
+    if (init_system(argc, argv, CUSTOMER_FILE) != 0)
+        return EXIT_FAILURE;
+
+    /* 2. commands.txt, validado contra as dimensoes ja conhecidas */
     load_commands(COMMANDS_FILE);
 
-    /* TODO: inicializar available/allocation/need, executar comandos
-       (request_resources / release_resources / print_state) e gravar result.txt */
+    /* 3. Executa e grava result.txt (so abre apos validar toda a entrada) */
+    FILE *out = fopen(RESULT_FILE, "w");
+    if (!out) fail("nao foi possivel criar '%s': %s", RESULT_FILE, strerror(errno));
 
-    /* Saída de depuração temporária */
-    printf("Recursos (%d):", num_resources);
-    for (int j = 0; j < num_resources; j++) printf(" %d", available_total[j]);
-    printf("\nClientes: %d\n", num_customers);
-    for (int i = 0; i < num_customers; i++) {
-        printf("  C%d max:", i);
-        for (int j = 0; j < num_resources; j++) printf(" %d", maximum[i][j]);
-        printf("\n");
-    }
-    printf("Comandos: %d\n", num_commands);
-    for (int k = 0; k < num_commands; k++) {
-        if (commands[k].type == CMD_STAR) { printf("  *\n"); continue; }
-        printf("  %s %d", commands[k].type == CMD_RQ ? "RQ" : "RL", commands[k].customer);
-        for (int j = 0; j < num_resources; j++) printf(" %d", commands[k].resources[j]);
-        printf("\n");
-    }
+    run_commands(out);
 
-    cleanup();
+    if (fclose(out) != 0) fail("falha ao gravar '%s': %s", RESULT_FILE, strerror(errno));
     return EXIT_SUCCESS;
 }
