@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,7 +5,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
-#include "init.h"
+
 #include "matriz.h"
 #include "banker.h"
 
@@ -48,6 +47,34 @@ static void fail(const char *fmt, ...) {
     exit(EXIT_FAILURE);
 }
 
+/* Le uma linha de f para *buf (cresce conforme preciso), sem usar getline
+   (que nao existe em todos os ambientes, como o MinGW).
+   Retorna 1 se leu uma linha, 0 no fim do arquivo, -1 sem memoria. */
+static int read_line(char **buf, size_t *cap, FILE *f) {
+    if (!*buf) {
+        *cap = 128;
+        *buf = malloc(*cap);
+        if (!*buf) return -1;
+    }
+    size_t len = 0;
+    (*buf)[0] = '\0';
+    for (;;) {
+        if (!fgets(*buf + len, (int)(*cap - len), f)) {
+            if (len == 0) return 0;               /* fim do arquivo */
+            break;                                /* ultima linha sem \n */
+        }
+        len += strlen(*buf + len);
+        if (len > 0 && (*buf)[len - 1] == '\n') break;
+        if (len + 1 >= *cap) {                    /* buffer cheio: dobra */
+            char *tmp = realloc(*buf, *cap * 2);
+            if (!tmp) return -1;
+            *buf = tmp;
+            *cap *= 2;
+        }
+    }
+    return 1;
+}
+
 /* Remove espacos, \r e \n nas pontas (in place) */
 static char *trim(char *s) {
     while (isspace((unsigned char)*s)) s++;
@@ -87,24 +114,24 @@ static void load_commands(const char *path) {
     size_t len = 0;
     int lineno = 0;
 
-    while (getline(&line, &len, f) != -1) {
+    int rl;
+    while ((rl = read_line(&line, &len, f)) == 1) {
         lineno++;
         char *t = trim(line);
         if (*t == '\0') continue;                      /* ignora linhas vazias */
 
-        char *save = NULL;
-        char *op = strtok_r(t, " \t", &save);
+        char *op = strtok(t, " \t");
         Command cmd = { CMD_STAR, -1, NULL };
 
         if (strcmp(op, "*") == 0) {
-            if (strtok_r(NULL, " \t", &save) != NULL) {
+            if (strtok(NULL, " \t") != NULL) {
                 free(line); fclose(f);
                 fail("%s:%d: o comando '*' nao recebe parametros", path, lineno);
             }
         } else if (strcmp(op, "RQ") == 0 || strcmp(op, "RL") == 0) {
             cmd.type = (op[1] == 'Q') ? CMD_RQ : CMD_RL;
 
-            char *tok = strtok_r(NULL, " \t", &save);
+            char *tok = strtok(NULL, " \t");
             if (!tok || parse_nonneg_int(tok, &cmd.customer) != 0) {
                 free(line); fclose(f);
                 fail("%s:%d: numero de cliente invalido ou ausente", path, lineno);
@@ -120,7 +147,7 @@ static void load_commands(const char *path) {
             if (!cmd.resources) { free(line); fclose(f); fail("falha de alocacao de memoria"); }
 
             int count = 0;
-            while ((tok = strtok_r(NULL, " \t", &save)) != NULL) {
+            while ((tok = strtok(NULL, " \t")) != NULL) {
                 if (count >= m || parse_nonneg_int(tok, &cmd.resources[count]) != 0) {
                     free(cmd.resources); free(line); fclose(f);
                     fail("%s:%d: valor invalido ou em excesso '%s' (esperados %d valores)",
@@ -148,6 +175,7 @@ static void load_commands(const char *path) {
         }
         commands[num_commands++] = cmd;
     }
+    if (rl < 0) { free(line); fclose(f); fail("falha de alocacao de memoria"); }
     free(line);
     fclose(f);
 }

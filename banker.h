@@ -13,6 +13,13 @@
  * (normalmente result.txt).
  */
 
+/* Le os recursos de argv[1..argc-1] e o arquivo de clientes e inicializa o
+   modulo matriz (AVAILABLE, MAXIMUM, ALLOCATION = 0, NEED = MAXIMUM).
+   NUMBER_OF_RESOURCES = argc - 1; NUMBER_OF_CUSTOMERS = linhas do arquivo.
+   Retorna 0 em sucesso; em erro imprime mensagem em stderr, nao deixa
+   estado parcial e retorna -1. */
+int init_system(int argc, char *argv[], const char *customer_filename);
+
 /* Algoritmo de Seguranca: true se existe uma sequencia segura em que todos
    os clientes conseguem terminar com os recursos disponiveis. */
 bool is_safe_state(void);
