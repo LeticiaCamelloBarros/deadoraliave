@@ -1,0 +1,149 @@
+EVIDENCIAS - Algoritmo de Banker
+Data: 2026-11-16 22:38:02
+Sistema: MINGW64_NT-10.0-22621 3.6.10-5a1665c8.x86_64 x86_64
+Compilador: 
+
+----------------------------------------------------------------
+CENARIO: Exemplo do enunciado (10 5 7)
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 0
+result.txt:
+  Allocate to customer 0 the resources 0 2 1
+  Allocate to customer 2 the resources 3 0 2
+  Allocate to customer 1 the resources 2 0 0
+  Allocate to customer 4 the resources 0 0 2
+  Release from customer 0 the resources 0 1 1
+  Allocate to customer 3 the resources 2 1 1
+  MAXIMUM   |   ALLOCATION  |   NEED
+  7 5 3     |   0 1 0       |   7 4 3
+  3 2 2     |   2 0 0       |   1 2 2
+  9 0 2     |   3 0 2       |   6 0 0
+  2 2 2     |   2 1 1       |   0 1 1
+  4 3 3     |   0 0 2       |   4 3 1
+  AVAILABLE 3 3 2
+  The resources 3 3 2 are not enough to customer 4 request 4 0 0
+  Allocate to customer 1 the resources 1 0 2
+  The customer 0 request 0 2 0 was denied because result in an unsafe state
+  The customer 2 request 0 1 0 was denied because exceed its maximum allocation
+
+----------------------------------------------------------------
+CENARIO: Sem argumentos
+COMANDO: ./banker 
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: argumentos insuficientes. Uso: C:\Users\ASUS\AppData\Local\Temp\tmp.OV5iJ8qj0x\banker.exe <inst_0> <inst_1> ...
+
+----------------------------------------------------------------
+CENARIO: Argumentos a menos que os recursos do customer.txt
+COMANDO: ./banker 10 5
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: customer.txt:1: formato invalido (esperado 2 valores separados por virgula)
+
+----------------------------------------------------------------
+CENARIO: Argumentos a mais que os recursos do customer.txt
+COMANDO: ./banker 10 5 7 8
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: customer.txt:1: formato invalido (esperado 4 valores separados por virgula)
+
+----------------------------------------------------------------
+CENARIO: Argumento nao numerico
+COMANDO: ./banker 10 x 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: argumento 2 invalido ('x'): esperado inteiro nao negativo
+
+----------------------------------------------------------------
+CENARIO: customer.txt inexistente
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: nao foi possivel abrir 'customer.txt': No such file or directory
+
+----------------------------------------------------------------
+CENARIO: customer.txt com campo vazio
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: customer.txt:1: campo vazio ou formato invalido (esperado 3 valores)
+
+----------------------------------------------------------------
+CENARIO: customer.txt com valor nao numerico
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: customer.txt:1: valor invalido 'a'
+
+----------------------------------------------------------------
+CENARIO: customer.txt com separador invalido
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: customer.txt:1: formato invalido (esperado 3 valores separados por virgula)
+
+----------------------------------------------------------------
+CENARIO: customer.txt vazio
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: 'customer.txt' nao contem nenhum cliente
+
+----------------------------------------------------------------
+CENARIO: commands.txt inexistente
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: nao foi possivel abrir 'commands.txt': No such file or directory
+
+----------------------------------------------------------------
+CENARIO: Comando desconhecido
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: commands.txt:1: comando desconhecido 'XX' (esperado RQ, RL ou *)
+
+----------------------------------------------------------------
+CENARIO: Cliente inexistente
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: commands.txt:1: cliente 9 inexistente (ha 5 clientes em customer.txt)
+
+----------------------------------------------------------------
+CENARIO: Comando com valores a menos
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: commands.txt:1: 2 valores encontrados, mas existem 3 recursos nos argumentos
+
+----------------------------------------------------------------
+CENARIO: Comando com valores a mais
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: commands.txt:1: valor invalido ou em excesso 'FÛ' (esperados 3 valores)
+
+----------------------------------------------------------------
+CENARIO: Comando * com parametros
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 1
+STDERR:
+  Erro: commands.txt:1: o comando '*' nao recebe parametros
+
+----------------------------------------------------------------
+CENARIO: RL maior que a alocacao (recusado) e RL valido
+COMANDO: ./banker 10 5 7
+CODIGO DE SAIDA: 0
+result.txt:
+  Allocate to customer 1 the resources 1 0 0
+  The customer 1 release 5 0 0 was denied because exceed its allocation
+  Release from customer 1 the resources 1 0 0
+  MAXIMUM   |   ALLOCATION  |   NEED
+  7 5 3     |   0 0 0       |   7 5 3
+  3 2 2     |   0 0 0       |   3 2 2
+  9 0 2     |   0 0 0       |   9 0 2
+  2 2 2     |   0 0 0       |   2 2 2
+  4 3 3     |   0 0 0       |   4 3 3
+  AVAILABLE 10 5 7
+
