@@ -6,6 +6,8 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <limits.h>
+#include "matriz.h"
+#include "resource.h" 
 
 #define CUSTOMER_FILE "customer.txt"
 #define COMMANDS_FILE "commands.txt"
@@ -66,6 +68,7 @@ static void parse_args(int argc, char *argv[]) {
         fail("uso: %s <inst_recurso_0> <inst_recurso_1> ... (ao menos 1 recurso)", argv[0]);
 
     num_resources = argc - 1;
+    /*available nao é uma matriz mas sim um vetor unidimensional */
     available_total = malloc(num_resources * sizeof(int));
     if (!available_total) fail("falha de alocacao de memoria");
 
