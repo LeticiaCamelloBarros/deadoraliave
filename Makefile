@@ -1,8 +1,22 @@
-CC     = gcc
-CFLAGS = -Wall -Wextra -std=c11 -O2
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=c99 -MMD -MP
+TARGET  = banker
 
-banker: main.c
-	$(CC) $(CFLAGS) -o banker main.c
+SRCS    = main.c init.c matriz.c banker.c
+OBJS    = $(SRCS:.c=.o)
+DEPS    = $(OBJS:.o=.d)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+-include $(DEPS)
 
 clean:
-	rm -f banker result.txt
+	rm -f *.o *.d banker banker.exe
+
+.PHONY: all clean
