@@ -6,7 +6,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
-
 #include "init.h"
 #include "matriz.h"
 #include "banker.h"
